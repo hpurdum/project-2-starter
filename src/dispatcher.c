@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
 
 #include "dispatcher.h"
 #include "shell_builtins.h"
@@ -50,7 +54,21 @@ static int dispatch_external_command(struct command *pipeline)
 	 *
 	 * Good luck!
 	 */
-	fprintf(stderr, "TODO: handle external commands\n");
+	int rc = fork();
+	if(rc < 0) {
+		fprintf(stderr, "error: fork failed to open\n");
+		exit(1);
+	}
+	else if(rc == 0) {
+		char* myargs[3];
+		myargs[0] = pipeline->argv[0];
+		myargs[1] = pipeline->argv[1];
+		myargs[2] = NULL;
+		execvp(myargs[0], myargs);
+	}
+	else {
+		wait(NULL);
+	}
 	return -1;
 }
 
