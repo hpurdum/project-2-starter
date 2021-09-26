@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 
 #include "dispatcher.h"
@@ -54,21 +55,34 @@ static int dispatch_external_command(struct command *pipeline)
 	 *
 	 * Good luck!
 	 */
+	int status = 0;
+	// open a child process
 	int rc = fork();
+	// check if fork fails
 	if(rc < 0) {
 		fprintf(stderr, "error: fork failed to open\n");
 		exit(1);
 	}
+	// check if fork success and run child process code
 	else if(rc == 0) {
-		// first step is to check for input/output redirection
-		// next check for pipeline
-		// finally we execvp command
-		execvp(pipeline->argv[0], pipeline->argv);
+		// try to run command, save -1 to status upon failure
+		status = execvp(pipeline->argv[0], pipeline->argv);
+		// if error occurs print out error message
+		if(status != 0) {
+			fprintf(stderr, "%s\n", strerror(errno));
+			exit(status);
+		}
 	}
+	// check if fork success and run parent code
 	else {
-		wait(NULL);
+		// return child exit code into status
+		waitpid(rc, &status, 0);
+		// check if childs return code is not 0
+		if(WEXITSTATUS(status) != 0) {
+			return status;
+		}
 	}
-	return -1;
+	return 0;
 }
 
 /**
