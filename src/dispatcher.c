@@ -60,11 +60,10 @@ static int dispatch_external_command(struct command *pipeline)
 		exit(1);
 	}
 	else if(rc == 0) {
-		char* myargs[3];
-		myargs[0] = pipeline->argv[0];
-		myargs[1] = pipeline->argv[1];
-		myargs[2] = NULL;
-		execvp(myargs[0], myargs);
+		// first step is to check for input/output redirection
+		// next check for pipeline
+		// finally we execvp command
+		execvp(pipeline->argv[0], pipeline->argv);
 	}
 	else {
 		wait(NULL);
