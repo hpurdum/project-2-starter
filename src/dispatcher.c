@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <fcntl.h>
 
 
 #include "dispatcher.h"
@@ -56,31 +57,125 @@ static int dispatch_external_command(struct command *pipeline)
 	 * Good luck!
 	 */
 	int status = 0;
-	// open a child process
-	int rc = fork();
-	// check if fork fails
-	if(rc < 0) {
-		fprintf(stderr, "error: fork failed to open\n");
-		exit(1);
-	}
-	// check if fork success and run child process code
-	else if(rc == 0) {
-		// try to run command, save -1 to status upon failure
-		status = execvp(pipeline->argv[0], pipeline->argv);
-		// if error occurs print out error message
-		if(status != 0) {
-			fprintf(stderr, "%s\n", strerror(errno));
-			exit(status);
+	// open a pipeline
+	int pipefd[2] = {0, 0};
+	int pfd = pipe(pipefd);
+	// check if pipeline opened
+	if(pfd == 0) {
+		// open a child process
+		int rc = fork();
+		// check if fork fails
+		if(rc < 0) {
+			fprintf(stderr, "error: fork failed to open\n");
+			exit(1);
+		}
+		// check if fork success and run child process code
+		else if(rc == 0) {
+
+			// CHILD FILE REDIRECTION
+			switch(pipeline->output_type) {
+				case COMMAND_OUTPUT_STDOUT: {
+					// try to run command, save -1 to status upon failure
+					status = execvp(pipeline->argv[0], pipeline->argv);
+					// if error occurs print out error message
+					if(status != 0) {
+						fprintf(stderr, "%s\n", strerror(errno));
+						exit(status);
+					}
+					break;
+				}
+				case COMMAND_OUTPUT_FILE_TRUNCATE: {
+					int fd = open(pipeline->output_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+					if(fd > 0) {
+						dup2(fd,STDOUT_FILENO);
+						// try to run command, save -1 to status upon failure
+						status = execvp(pipeline->argv[0], pipeline->argv);
+						// if error occurs print out error message
+						if(status != 0) {
+							fprintf(stderr, "%s\n", strerror(errno));
+							exit(status);
+						}
+						close(fd);
+					}
+					else {
+						fprintf(stderr, "error: bad file descriptor\n");
+						exit(-1);
+					}
+					break;
+				}
+				case COMMAND_OUTPUT_FILE_APPEND: {
+					int fd = open(pipeline->output_filename, O_RDWR | O_CREAT | O_APPEND, 0644);
+					if(fd > 0) {
+						dup2(fd,STDOUT_FILENO);
+						// try to run command, save -1 to status upon failure
+						status = execvp(pipeline->argv[0], pipeline->argv);
+						// if error occurs print out error message
+						if(status != 0) {
+							fprintf(stderr, "%s\n", strerror(errno));
+							exit(status);
+						}
+						close(fd);
+					}
+					else {
+						fprintf(stderr, "error: bad file descriptor\n");
+						exit(-1);
+					}
+					break;
+				}
+				case COMMAND_OUTPUT_PIPE: {
+					// open a child process
+					int status2 = 0;
+					int rc2 = fork();
+					// check if fork fails
+					if(rc2 < 0) {
+						fprintf(stderr, "error: fork2 failed to open\n");
+						exit(1);
+					}
+					else if(rc2 == 0) {
+						dup2(pipefd[1], STDOUT_FILENO);
+						// try to run command, save -1 to status upon failure
+						status2 = execvp(pipeline->argv[0], pipeline->argv);
+						// if error occurs print out error message
+						if(status2 != 0) {
+							fprintf(stderr, "%s\n", strerror(errno));
+							exit(status);
+						}
+					}
+					else {
+						close(pipefd[1]);
+						waitpid(rc2, &status2, 0);
+						// check if childs return code is not 0
+						if(WEXITSTATUS(status2) != 0) {
+							return status2;
+						}
+					}
+					dup2(pipefd[0], STDIN_FILENO);
+					// try to run command, save -1 to status upon failure
+					status = execvp(pipeline->pipe_to->argv[0], pipeline->pipe_to->argv);
+					// if error occurs print out error message
+					if(status != 0) {
+						fprintf(stderr, "%s\n", strerror(errno));
+						exit(status);
+					}
+				}
+			}
+		}
+		// check if fork success and run parent code
+		else {
+			// return child exit code into status
+			
+			close(pipefd[0]);
+			waitpid(rc, &status, 0);
+			
+			// check if childs return code is not 0
+			if(WEXITSTATUS(status) != 0) {
+				return status;
+			}
+			close(pipefd[1]);
 		}
 	}
-	// check if fork success and run parent code
 	else {
-		// return child exit code into status
-		waitpid(rc, &status, 0);
-		// check if childs return code is not 0
-		if(WEXITSTATUS(status) != 0) {
-			return status;
-		}
+		fprintf(stderr, "error: pipeline failed to open\n");
 	}
 	return 0;
 }
